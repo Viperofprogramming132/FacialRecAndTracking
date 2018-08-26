@@ -46,7 +46,7 @@ namespace FacialTest
             return returnImage;
         }
 
-        public string CompareImages(Image<Gray, byte> Image)
+        public async Task<string> CompareImagesAsync(Image<Gray, byte> Image)
         {
             List<string> imageDirectory = Directory.GetFiles(Directory.GetCurrentDirectory() + "\\photos", "*.jpg").ToList();
             List<long> scores = new List<long>();
@@ -54,18 +54,17 @@ namespace FacialTest
             foreach (string s in imageDirectory)
             {
                 Image<Gray, byte> i = new Image<Gray, byte>(s);
-                CvInvoke.Imshow("AbsDiff", i);
+                //CvInvoke.Imshow("AbsDiff", i);
 
 
                 NormaliseImage(Image, i, out Image, out i);
 
                 Mat im = i.Resize(2, Inter.Cubic).ToUMat().GetMat(AccessType.Fast);
                 Mat ima = Image.Resize(2,Inter.Cubic).ToUMat().GetMat(AccessType.Fast);
-                int count;
                 i = Draw(im, ima, out long score).ToImage<Gray, byte>();
                 im.Dispose();
                 ima.Dispose();
-                CvInvoke.Imshow("AbsDiff", i );
+                //CvInvoke.Imshow("AbsDiff", i );
                 Debug.WriteLine(score);
                 scores.Add(score);
 
