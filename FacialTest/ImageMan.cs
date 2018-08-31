@@ -16,6 +16,7 @@ using Emgu.CV.CvEnum;
 using Emgu.CV.XFeatures2D;
 using Emgu.CV.Cuda;
 
+
 namespace FacialTest
 {
     public class ImageMan
@@ -117,60 +118,115 @@ namespace FacialTest
             return null;
         }
 
-        public static void FindMatch(Mat modelImage, Mat observedImage, out VectorOfKeyPoint modelKeyPoints, out VectorOfKeyPoint observedKeyPoints, VectorOfVectorOfDMatch matches, out Mat mask, out Mat homography, out long score)
+        public static void FindMatch(Mat modelImage, Mat observedImage, out long matchTime, out VectorOfKeyPoint modelKeyPoints, out VectorOfKeyPoint observedKeyPoints, VectorOfVectorOfDMatch matches, out Mat mask, out Mat homography, out long score)
         {
             int k = 2;
-            double uniquenessThreshold = 1;
-            double hessianThresh = 300;
+            double uniquenessThreshold = 5;
 
+            Stopwatch watch;
             homography = null;
-
+            mask = null;
+            score = 0;
+            bool mozan = true;
             modelKeyPoints = new VectorOfKeyPoint();
             observedKeyPoints = new VectorOfKeyPoint();
-
-            CudaSURF surfCuda = new CudaSURF((float)hessianThresh);
-            using (GpuMat gpuModelImage = new GpuMat(modelImage))
-            //extract features from the object image
-            using (GpuMat gpuModelKeyPoints = surfCuda.DetectKeyPointsRaw(gpuModelImage, null))
-            using (GpuMat gpuModelDescriptors = surfCuda.ComputeDescriptorsRaw(gpuModelImage, null, gpuModelKeyPoints))
-            using (CudaBFMatcher matcher = new CudaBFMatcher(DistanceType.L2))
+            if (mozan == true)
             {
-                surfCuda.DownloadKeypoints(gpuModelKeyPoints, modelKeyPoints);
-
-                // extract features from the observed image
-                using (GpuMat gpuObservedImage = new GpuMat(observedImage))
-                using (GpuMat gpuObservedKeyPoints = surfCuda.DetectKeyPointsRaw(gpuObservedImage, null))
-                using (GpuMat gpuObservedDescriptors = surfCuda.ComputeDescriptorsRaw(gpuObservedImage, null, gpuObservedKeyPoints))
-                //using (GpuMat tmp = new GpuMat())
-                //using (Stream stream = new Stream())
+                CudaSURF surfGPU = new CudaSURF(500,4,2,false);
+                using (CudaImage<Gray, Byte> gpuModelImage = new CudaImage<Gray, byte>(modelImage))
+                //extract features from the object image
+                using (GpuMat gpuModelKeyPoints = surfGPU.DetectKeyPointsRaw(gpuModelImage, null))
+                using (GpuMat gpuModelDescriptors = surfGPU.ComputeDescriptorsRaw(gpuModelImage, null, gpuModelKeyPoints))
+                using (CudaBFMatcher matcher = new CudaBFMatcher(DistanceType.L2))
                 {
-                    matcher.KnnMatch(gpuObservedDescriptors, gpuModelDescriptors, matches, k);
+                    
+                    surfGPU.DownloadKeypoints(gpuModelKeyPoints, modelKeyPoints);
+                    watch = Stopwatch.StartNew();
 
-                    surfCuda.DownloadKeypoints(gpuObservedKeyPoints, observedKeyPoints);
-
-                    mask = new Mat(matches.Size, 1, DepthType.Cv8U, 1);
-                    mask.SetTo(new MCvScalar(255));
-                    Features2DToolbox.VoteForUniqueness(matches, uniquenessThreshold, mask);
-
-                    score = 0;
-                    for (int i = 0; i < matches.Size; i++)
+                    // extract features from the observed image
+                    using (CudaImage<Gray, Byte> gpuObservedImage = new CudaImage<Gray, byte>(observedImage))
+                    using (GpuMat gpuObservedKeyPoints = surfGPU.DetectKeyPointsRaw(gpuObservedImage, null))
+                    using (GpuMat gpuObservedDescriptors = surfGPU.ComputeDescriptorsRaw(gpuObservedImage, null, gpuObservedKeyPoints))
+                    using (GpuMat<int> gpuMatchIndices = new GpuMat<int>(gpuObservedDescriptors.Size.Height, k, 1, true))
+                    using (GpuMat<float> gpuMatchDist = new GpuMat<float>(gpuObservedDescriptors.Size.Height, k, 1, true))
+                    using (GpuMat<Byte> gpuMask = new GpuMat<byte>(gpuMatchIndices.Size.Height, 1, 1))
+                    using (Emgu.CV.Cuda.Stream stream = new Emgu.CV.Cuda.Stream())
                     {
-                        if (mask.GetData(i)[0] == 0) continue;
-                        foreach (var e in matches[i].ToArray())
-                            ++score;
+                        matcher.KnnMatch(gpuObservedDescriptors, gpuModelDescriptors, matches, k, null);
+                        //indices = new Matrix<int>(gpuMatchIndices.Size);
+                        //mask = new Matrix<byte>(gpuMask.Size);
+                        
+
+                        Features2DToolbox.VoteForUniqueness(matches, uniquenessThreshold,gpuMask.ToMat());
+                        /*//gpu implementation of voteForUniquess
+                        using (GpuMat col0 = gpuMatchDist.Col(0))
+                        using (GpuMat col1 = gpuMatchDist.Col(1))
+                        {
+                            CudaInvoke.Multiply(col1, new GpuMat(), col1, 1, DepthType.Default, stream);
+                            CudaInvoke.Compare(col0, col1, gpuMask, CmpType.LessEqual, stream);
+                        }*/
+
+                        
+                        surfGPU.DownloadKeypoints(gpuObservedKeyPoints, observedKeyPoints);
+
+                        //wait for the stream to complete its tasks
+                        //We can perform some other CPU intesive stuffs here while we are waiting for the stream to complete.
+                        stream.WaitForCompletion();
+
+                        gpuMask.Download(mask);
+                        //gpuMatchIndices.Download(indices);
+
+                        if (CudaInvoke.CountNonZero(gpuMask) >= 4)
+                        {
+                            int nonZeroCount = Features2DToolbox.VoteForSizeAndOrientation(modelKeyPoints, observedKeyPoints, matches, mask, 1.5, 20);
+                            if (nonZeroCount >= 4)
+                                homography = Features2DToolbox.GetHomographyMatrixFromMatchedFeatures(modelKeyPoints, observedKeyPoints, matches, mask, 2);
+                        }
+
+                        watch.Stop();
                     }
 
-                    int nonZeroCount = CvInvoke.CountNonZero(mask);
-                    if (nonZeroCount >= 4)
+                    for (int i = 0; i < matches.Size; i++)
                     {
-                        nonZeroCount = Features2DToolbox.VoteForSizeAndOrientation(modelKeyPoints, observedKeyPoints,
-                            matches, mask, 1.5, 20);
-                        if (nonZeroCount >= 4)
-                            homography = Features2DToolbox.GetHomographyMatrixFromMatchedFeatures(modelKeyPoints,
-                                observedKeyPoints, matches, mask, 2);
+                        score++;
                     }
                 }
             }
+            /*else
+            {
+                SURF surfCPU = new SURF(500, 4, 2, false);
+                //extract features from the object image
+                modelKeyPoints = new VectorOfKeyPoint();
+                Matrix<float> modelDescriptors = surfCPU.DetectAndCompute(modelImage, null, modelKeyPoints);
+
+                watch = Stopwatch.StartNew();
+
+                // extract features from the observed image
+                observedKeyPoints = new VectorOfKeyPoint();
+                Matrix<float> observedDescriptors = surfCPU.DetectAndCompute(observedImage, null, observedKeyPoints);
+                BruteForceMatcher<float> matcher = new BruteForceMatcher<float>(DistanceType.L2);
+                matcher.Add(modelDescriptors);
+
+                indices = new Matrix<int>(observedDescriptors.Rows, k);
+                using (Matrix<float> dist = new Matrix<float>(observedDescriptors.Rows, k))
+                {
+                    matcher.KnnMatch(observedDescriptors, indices, dist, k, null);
+                    mask = new Matrix<byte>(dist.Rows, 1);
+                    mask.SetValue(255);
+                    Features2DToolbox.VoteForUniqueness(dist, uniquenessThreshold, mask);
+                }
+
+                int nonZeroCount = CvInvoke.cvCountNonZero(mask);
+                if (nonZeroCount >= 4)
+                {
+                    nonZeroCount = Features2DToolbox.VoteForSizeAndOrientation(modelKeyPoints, observedKeyPoints, indices, mask, 1.5, 20);
+                    if (nonZeroCount >= 4)
+                        homography = Features2DToolbox.GetHomographyMatrixFromMatchedFeatures(modelKeyPoints, observedKeyPoints, indices, mask, 2);
+                }
+
+                watch.Stop();
+            }*/
+            matchTime = 0;
         }
 
         /// <summary>
@@ -184,10 +240,11 @@ namespace FacialTest
             Mat homography;
             VectorOfKeyPoint modelKeyPoints;
             VectorOfKeyPoint observedKeyPoints;
+            score = 0;
             using (VectorOfVectorOfDMatch matches = new VectorOfVectorOfDMatch())
             {
                 Mat mask;
-                FindMatch(modelImage, observedImage, out modelKeyPoints, out observedKeyPoints, matches,
+                FindMatch(modelImage, observedImage, out long matchTime, out modelKeyPoints, out observedKeyPoints, matches,
                    out mask, out homography, out score);
 
                 //Draw the matched keypoints
@@ -223,6 +280,8 @@ namespace FacialTest
                 return result;
 
             }
+
+            return null;
         }
 
         public void NormaliseImage(Image<Gray,byte> image1, Image<Gray, byte> image2, out Image<Gray, byte> image1out, out Image<Gray, byte> image2out)

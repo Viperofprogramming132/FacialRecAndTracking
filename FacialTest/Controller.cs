@@ -22,7 +22,7 @@ namespace FacialTest
 {
     public class Controller
     {
-        const bool DEBUG = false;
+        const bool DEBUG = true;
         const bool TIMERS = false;
 
         
@@ -97,8 +97,15 @@ namespace FacialTest
                     foreach(Face f in m_Faces)
                     { 
                         Rectangle r = f.ROI;
-                        t.Update(image, out r);
-                        CvInvoke.Circle(image, new Point(r.X + (r.Width / 2), r.Y + (r.Height / 2)), 20, new MCvScalar(0, 255, 0), 2);
+                        if (t.Update(image, out r))
+                        {
+                            CvInvoke.Circle(image, new Point(r.X + (r.Width / 2), r.Y + (r.Height / 2)), 20, new MCvScalar(0, 255, 0), 2);
+                            f.ROI = r;
+                        }
+                        else
+                        {
+                            f.Tracker = new TrackerBoosting();
+                        }
                     }
                 }
 
@@ -162,8 +169,7 @@ namespace FacialTest
                 Task<string> task = tasks[index];
                 if (task.Result == "Failed")
                 {
-                    ImageMan.Instance.saveJpeg(Directory.GetCurrentDirectory() + "\\photos\\" + DT + ".jpg", Images[indexList[index]].Bitmap,
-                        100);
+                    //ImageMan.Instance.saveJpeg(Directory.GetCurrentDirectory() + "\\photos\\" + DT + ".jpg", Images[indexList[index]].Bitmap, 100);
                     m_Faces.Add(new Face(Images[indexList[index]], DT, image.Bitmap, ROIs, Images.FindIndex(a => a == Images[indexList[index]])));
                 }
 
