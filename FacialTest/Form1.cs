@@ -1,37 +1,45 @@
-﻿using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Data;
-using System.Drawing;
-using System.Linq;
-using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
-using System.Windows.Forms;
-using Emgu.CV;
-using Emgu.CV.Cuda;
-using Emgu.Util;
-using Emgu.CV.Structure;
-using Emgu.CV.CvEnum;
-using System.Drawing.Imaging;
-using Emgu.CV.UI;
-using Emgu.CV.Tracking;
-using System.IO;
-using System.Diagnostics;
+﻿// Project: FacialTest
+// Filename; Form1.cs
+// Created; 10/08/2018
+// Edited: 04/09/2018
 
 namespace FacialTest
 {
+    using System;
+    using System.Diagnostics;
+    using System.Windows.Forms;
+
     public partial class Form1 : Form
     {
-        private Controller TrackingController = Controller.Instance;
+        /// <summary>
+        /// The tracking controller.
+        /// </summary>
+        private readonly Controller trackingController = Controller.Instance;
+
         public Form1()
         {
-            InitializeComponent();
+            this.InitializeComponent();
+            this.trackingController.InitializeControl();
         }
 
         private void button1_Click(object sender, EventArgs e)
         {
-            TrackingController.ReadAllFrames();
+            this.trackingController.ReadAllFrames();
+            this.FPSTimer.Start();
+        }
+
+        private void FPSTimer_Tick(object sender, EventArgs e)
+        {
+            this.lbl_FPSNum.Text = this.trackingController.FPS.ToString();
+            this.trackingController.FPS = 0;
+
+            if (this.trackingController.Console)
+            {
+                Console.WriteLine("Cameras: " + this.trackingController.Cameras.Count);
+                Console.WriteLine("Trackers: " + this.trackingController.Trackers.Count);
+                Console.WriteLine("Faces: " + this.trackingController.Faces.Count);
+            }
         }
     }
+    
 }

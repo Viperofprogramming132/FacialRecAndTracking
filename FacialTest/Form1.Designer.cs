@@ -28,18 +28,13 @@
         /// </summary>
         private void InitializeComponent()
         {
-            this.pictureBox1 = new System.Windows.Forms.PictureBox();
+            this.components = new System.ComponentModel.Container();
             this.button1 = new System.Windows.Forms.Button();
-            ((System.ComponentModel.ISupportInitialize)(this.pictureBox1)).BeginInit();
+            this.ltv_Cameras = new System.Windows.Forms.ListView();
+            this.lbl_FPS = new System.Windows.Forms.Label();
+            this.lbl_FPSNum = new System.Windows.Forms.Label();
+            this.FPSTimer = new System.Windows.Forms.Timer(this.components);
             this.SuspendLayout();
-            // 
-            // pictureBox1
-            // 
-            this.pictureBox1.Location = new System.Drawing.Point(13, 33);
-            this.pictureBox1.Name = "pictureBox1";
-            this.pictureBox1.Size = new System.Drawing.Size(909, 571);
-            this.pictureBox1.TabIndex = 0;
-            this.pictureBox1.TabStop = false;
             // 
             // button1
             // 
@@ -51,24 +46,59 @@
             this.button1.UseVisualStyleBackColor = true;
             this.button1.Click += new System.EventHandler(this.button1_Click);
             // 
+            // ltv_Cameras
+            // 
+            this.ltv_Cameras.Location = new System.Drawing.Point(13, 34);
+            this.ltv_Cameras.Name = "ltv_Cameras";
+            this.ltv_Cameras.Size = new System.Drawing.Size(332, 298);
+            this.ltv_Cameras.TabIndex = 2;
+            this.ltv_Cameras.UseCompatibleStateImageBehavior = false;
+            // 
+            // lbl_FPS
+            // 
+            this.lbl_FPS.AutoSize = true;
+            this.lbl_FPS.Location = new System.Drawing.Point(168, 9);
+            this.lbl_FPS.Name = "lbl_FPS";
+            this.lbl_FPS.Size = new System.Drawing.Size(27, 13);
+            this.lbl_FPS.TabIndex = 3;
+            this.lbl_FPS.Text = "FPS";
+            // 
+            // lbl_FPSNum
+            // 
+            this.lbl_FPSNum.AutoSize = true;
+            this.lbl_FPSNum.Location = new System.Drawing.Point(201, 9);
+            this.lbl_FPSNum.Name = "lbl_FPSNum";
+            this.lbl_FPSNum.Size = new System.Drawing.Size(13, 13);
+            this.lbl_FPSNum.TabIndex = 4;
+            this.lbl_FPSNum.Text = "0";
+            // 
+            // FPSTimer
+            // 
+            this.FPSTimer.Interval = 1000;
+            this.FPSTimer.Tick += new System.EventHandler(this.FPSTimer_Tick);
+            // 
             // Form1
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(928, 613);
+            this.Controls.Add(this.lbl_FPSNum);
+            this.Controls.Add(this.lbl_FPS);
+            this.Controls.Add(this.ltv_Cameras);
             this.Controls.Add(this.button1);
-            this.Controls.Add(this.pictureBox1);
             this.Name = "Form1";
             this.Text = "Form1";
-            ((System.ComponentModel.ISupportInitialize)(this.pictureBox1)).EndInit();
             this.ResumeLayout(false);
+            this.PerformLayout();
 
         }
 
         #endregion
-
-        private System.Windows.Forms.PictureBox pictureBox1;
         private System.Windows.Forms.Button button1;
+        private System.Windows.Forms.ListView ltv_Cameras;
+        private System.Windows.Forms.Label lbl_FPS;
+        private System.Windows.Forms.Label lbl_FPSNum;
+        private System.Windows.Forms.Timer FPSTimer;
     }
 }
 

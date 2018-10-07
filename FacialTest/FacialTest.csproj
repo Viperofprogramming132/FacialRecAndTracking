@@ -53,6 +53,9 @@
     <CodeAnalysisRuleSet>MinimumRecommendedRules.ruleset</CodeAnalysisRuleSet>
     <Prefer32Bit>true</Prefer32Bit>
   </PropertyGroup>
+  <PropertyGroup>
+    <StartupObject />
+  </PropertyGroup>
   <ItemGroup>
     <Reference Include="Emgu.CV.UI, Version=3.4.1.2980, Culture=neutral, processorArchitecture=MSIL">
       <HintPath>..\packages\EMGU.CV-CUDA.3.4.1.2980\lib\net35\Emgu.CV.UI.dll</HintPath>
@@ -79,6 +82,7 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Camera.cs" />
     <Compile Include="Controller.cs" />
     <Compile Include="DetectFace.cs" />
     <Compile Include="Face.cs" />
@@ -93,6 +97,7 @@
     <Compile Include="Properties\AssemblyInfo.cs" />
     <EmbeddedResource Include="Form1.resx">
       <DependentUpon>Form1.cs</DependentUpon>
+      <SubType>Designer</SubType>
     </EmbeddedResource>
     <EmbeddedResource Include="Properties\Resources.resx">
       <Generator>ResXFileCodeGenerator</Generator>
@@ -103,6 +108,7 @@
       <AutoGen>True</AutoGen>
       <DependentUpon>Resources.resx</DependentUpon>
     </Compile>
+    <None Include="ClassDiagram1.cd" />
     <None Include="packages.config" />
     <None Include="Properties\Settings.settings">
       <Generator>SettingsSingleFileGenerator</Generator>

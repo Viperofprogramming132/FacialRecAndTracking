@@ -1,112 +1,370 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using System.Drawing;
-using Emgu.CV;
-using Emgu.CV.Structure;
-using System.IO;
-using System.Drawing.Imaging;
-using System.Diagnostics;
-using Emgu.CV.Util;
-using Emgu.CV.Features2D;
-using Emgu.CV.Flann;
-using Emgu.CV.CvEnum;
-using Emgu.CV.XFeatures2D;
-using Emgu.CV.Cuda;
-
+﻿// Project: FacialTest
+// Filename; ImageMan.cs
+// Created; 14/08/2018
+// Edited: 04/09/2018
 
 namespace FacialTest
 {
+    using System;
+    using System.Collections.Generic;
+    using System.Diagnostics;
+    using System.Drawing;
+    using System.Drawing.Imaging;
+    using System.IO;
+    using System.Linq;
+    using System.Threading.Tasks;
+
+    using Emgu.CV;
+    using Emgu.CV.Cuda;
+    using Emgu.CV.CvEnum;
+    using Emgu.CV.Features2D;
+    using Emgu.CV.Structure;
+    using Emgu.CV.Util;
+    using Emgu.CV.XFeatures2D;
+
     public class ImageMan
     {
-
         private static ImageMan instance;
 
-        public static ImageMan Instance { get { if (instance == null) { instance = new ImageMan(); } return instance; } }
+        private CudaClahe equalizerCudaClahe = new CudaClahe(40d, new Size(8, 8));
+        
 
         private ImageMan()
         {
-
         }
 
-        public List<Image<Gray, byte>> CropImage(Mat image, List<Rectangle> ROIs)
+        public static ImageMan Instance
         {
-            List<Image<Gray, byte>> returnImage = new List<Image<Gray, byte>>();
-
-            using (Image<Gray, byte> i = image.ToImage<Gray, byte>())
+            get
             {
-                foreach (Rectangle roi in ROIs)
+                if (instance == null) instance = new ImageMan();
+
+                return instance;
+            }
+        }
+
+        public async Task<string> CompareImagesAsync(Mat Image)
+        {
+            List<string> imageDirectory =
+                Directory.GetFiles(Directory.GetCurrentDirectory() + "\\photos", "*.png").ToList();
+            List<long> scores = new List<long>();
+            foreach (string s in imageDirectory)
+            {
+                Mat i = new Mat(s);
+                ////CvInvoke.Imshow("AbsDiff", i);
+                this.NormaliseImage(Image, i, out Image, out i);
+
+                await Task.Delay(1);
+
+                await this.Draw(i, Image, out long score, out Mat resultMat).ConfigureAwait(false);
+
+                CvInvoke.Imshow("AbsDiff", resultMat);
+                resultMat.Dispose();
+                Debug.WriteLine(score);
+                scores.Add(score);
+            }
+
+            for (int i = 0; i < scores.Count; ++i)
+            {
+                if (scores[i] > 7) return imageDirectory[i];
+
+                if (scores[i] < 5) return "Unusable";
+            }
+
+            return "Failed";
+        }
+
+        public List<Mat> CropImage(Mat image, List<Rectangle> ROIs)
+        {
+            List<Mat> returnImage = new List<Mat>();
+            
+            foreach (Rectangle roi in ROIs)
+            {
+                using (Mat i = new Mat(image,roi))
                 {
-                    i.ROI = roi;
-                    returnImage.Add(i.Copy());
+                    CvInvoke.CvtColor(i,i,ColorConversion.Bgr2Gray);
+                    returnImage.Add(i);
                 }
             }
 
             return returnImage;
         }
 
-        public async Task<string> CompareImagesAsync(Image<Gray, byte> Image)
+        public void NormaliseImage(
+            Mat image1,
+            Mat image2,
+            out Mat image1out,
+            out Mat image2out)
         {
-            List<string> imageDirectory = Directory.GetFiles(Directory.GetCurrentDirectory() + "\\photos", "*.jpg").ToList();
-            List<long> scores = new List<long>();
-
-            foreach (string s in imageDirectory)
-            {
-                Image<Gray, byte> i = new Image<Gray, byte>(s);
-                //CvInvoke.Imshow("AbsDiff", i);
+            image1out = new Mat();
+            image2out = new Mat();
 
 
-                NormaliseImage(Image, i, out Image, out i);
-
-                Mat im = i.Resize(2, Inter.Cubic).ToUMat().GetMat(AccessType.Fast);
-                Mat ima = Image.Resize(2,Inter.Cubic).ToUMat().GetMat(AccessType.Fast);
-                i = Draw(im, ima, out long score).ToImage<Gray, byte>();
-                im.Dispose();
-                ima.Dispose();
-                //CvInvoke.Imshow("AbsDiff", i );
-                Debug.WriteLine(score);
-                scores.Add(score);
-
-              
-            }
-
-            for (int i = 0; i < scores.Count; ++i)
-            {
-                if (scores[i] > 70)
-                {
-                    return imageDirectory[i];
-                }
-
-                if (scores[i] < 10)
-                {
-                    return "Unuseable";
-                }
-            }
-
-            return "Failed";
+            CvInvoke.Resize(image1, image1out, new Size(250, 250));
+            CvInvoke.Resize(image2, image2out, new Size(250, 250));
         }
 
-        public void saveJpeg(string path, Bitmap img, long quality)
+        /// <summary>
+        /// Save image as png
+        /// </summary>
+        /// <param name="path">
+        /// The path.
+        /// </param>
+        /// <param name="img">
+        /// The img.
+        /// </param>
+        public async void SavePng(string path, Mat img)
         {
-            // Encoder parameter for image quality
+            //Get Current path for location
+            path = Directory.GetCurrentDirectory() + "\\photos\\" + path + ".png";
 
-            EncoderParameter qualityParam = new EncoderParameter(System.Drawing.Imaging.Encoder.Quality, quality);
+            GpuMat iGpuMat = new GpuMat(img);
 
-            // Jpeg image codec
-            ImageCodecInfo jpegCodec = this.getEncoderInfo("image/jpeg");
+            img.Dispose();
 
-            if (jpegCodec == null)
-                return;
+            this.equalizerCudaClahe.Apply(iGpuMat, iGpuMat);
 
-            EncoderParameters encoderParams = new EncoderParameters(1);
-            encoderParams.Param[0] = qualityParam;
-
-            img.Save(path, jpegCodec, encoderParams);
+            //Saves the image
+            iGpuMat.Bitmap.Save(path,ImageFormat.Png);
         }
 
-        private ImageCodecInfo getEncoderInfo(string mimeType)
+        /// <summary>
+        /// Draw the model image and observed image, the matched features and homography projection.
+        /// </summary>
+        /// <param name="modelImage">
+        /// The model image
+        /// </param>
+        /// <param name="observedImage">
+        /// The observed image
+        /// </param>
+        /// <param name="score">
+        /// The score.
+        /// </param>
+        /// <returns>
+        /// The model image and observed image, the matched features and homography projection.
+        /// </returns>
+        private Task<Mat> Draw(Mat modelImage, Mat observedImage, out long score, out Mat result)
+        {
+            score = 0;
+            using (VectorOfVectorOfDMatch matches = new VectorOfVectorOfDMatch())
+            {
+                this.FindMatch(
+                    modelImage,
+                    observedImage,
+                    out long matchTime,
+                    out var modelKeyPoints,
+                    out var observedKeyPoints,
+                    matches,
+                    out var mask,
+                    out var homography,
+                    out score);
+
+                //Gets the score from the mask
+                score = this.CountMatches(mask);
+
+
+                //Draw the matched keypoints
+                result = new Mat();
+                Features2DToolbox.DrawMatches(
+                    modelImage,
+                    modelKeyPoints,
+                    observedImage,
+                    observedKeyPoints,
+                    matches,
+                    result,
+                    new MCvScalar(255, 255, 255),
+                    new MCvScalar(255, 255, 255),
+                    mask);
+
+                return Task.FromResult<Mat>(result);
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Finds matching points in the faces using SURF
+        /// </summary>
+        /// <param name="modelImage">
+        /// The model image.
+        /// </param>
+        /// <param name="observedImage">
+        /// The observed image.
+        /// </param>
+        /// <param name="matchTime">
+        /// The match time.
+        /// </param>
+        /// <param name="modelKeyPoints">
+        /// The model key points.
+        /// </param>
+        /// <param name="observedKeyPoints">
+        /// The observed key points.
+        /// </param>
+        /// <param name="matches">
+        /// The matches.
+        /// </param>
+        /// <param name="mask">
+        /// The mask.
+        /// </param>
+        /// <param name="homography">
+        /// The homography.
+        /// </param>
+        /// <param name="score">
+        /// The score.
+        /// </param>
+        private void FindMatch(
+            Mat modelImage,
+            Mat observedImage,
+            out long matchTime,
+            out VectorOfKeyPoint modelKeyPoints,
+            out VectorOfKeyPoint observedKeyPoints,
+            VectorOfVectorOfDMatch matches,
+            out Mat mask,
+            out Mat homography,
+            out long score)
+        {
+            int k = 2;
+            double uniquenessThreshold = 5;
+            Stopwatch watch;
+            homography = null;
+            mask = null;
+            score = 0;
+
+            
+            
+            modelKeyPoints = new VectorOfKeyPoint();
+            observedKeyPoints = new VectorOfKeyPoint();
+
+            
+
+            if (Controller.Instance.Cuda)
+            {
+                CudaSURF surfGPU = new CudaSURF(700f, 4, 2, false);
+                using (CudaImage<Gray, byte> gpuModelImage = new CudaImage<Gray, byte>(modelImage))
+                    //extract features from the object image
+                using (GpuMat gpuModelKeyPoints = surfGPU.DetectKeyPointsRaw(gpuModelImage, null))
+                using (GpuMat gpuModelDescriptors =
+                    surfGPU.ComputeDescriptorsRaw(gpuModelImage, null, gpuModelKeyPoints))
+                using (CudaBFMatcher matcher = new CudaBFMatcher(DistanceType.L2))
+                {
+                    surfGPU.DownloadKeypoints(gpuModelKeyPoints, modelKeyPoints);
+                    watch = Stopwatch.StartNew();
+
+                    // extract features from the observed image
+                    using (CudaImage<Gray, Byte> gpuObservedImage = new CudaImage<Gray, byte>(observedImage))
+                    using (GpuMat gpuObservedKeyPoints = surfGPU.DetectKeyPointsRaw(gpuObservedImage, null))
+                    using (GpuMat gpuObservedDescriptors = surfGPU.ComputeDescriptorsRaw(
+                        gpuObservedImage,
+                        null,
+                        gpuObservedKeyPoints))
+                    using (GpuMat<int> gpuMatchIndices = new GpuMat<int>(
+                        gpuObservedDescriptors.Size.Height,
+                        k,
+                        1,
+                        true))
+                    using (GpuMat<float> gpuMatchDist = new GpuMat<float>(
+                        gpuObservedDescriptors.Size.Height,
+                        k,
+                        1,
+                        true))
+                    //using (GpuMat<Byte> gpuMask = new GpuMat<byte>(gpuMatchIndices.Size.Height, 1, 1))
+                    using (Emgu.CV.Cuda.Stream stream = new Emgu.CV.Cuda.Stream())
+                    {
+                        matcher.KnnMatch(gpuObservedDescriptors, gpuModelDescriptors, matches, k, null);
+                        //indices = new Matrix<int>(gpuMatchIndices.Size);
+                        //mask = new Matrix<byte>(gpuMask.Size);
+
+                        mask = new Mat(matches.Size, 1, DepthType.Cv8U, 1);
+                        mask.SetTo(new MCvScalar(255));
+
+
+                        surfGPU.DownloadKeypoints(gpuObservedKeyPoints, observedKeyPoints);
+                        /*//gpu implementation of voteForUniquess
+                        using (GpuMat col0 = gpuMatchDist.Col(0))
+                        using (GpuMat col1 = gpuMatchDist.Col(1))
+                        {
+                            CudaInvoke.Multiply(col1, new GpuMat(), col1, 1, DepthType.Default, stream);
+                            CudaInvoke.Compare(col0, col1, mask, CmpType.LessEqual, stream);
+                        }*/
+                        
+                        Features2DToolbox.VoteForUniqueness(matches, uniquenessThreshold, mask);
+
+                        //wait for the stream to complete its tasks
+                        //We can perform some other CPU intesive stuffs here while we are waiting for the stream to complete.
+                        stream.WaitForCompletion();
+                        //gpuMatchIndices.Download(indices);
+                        if (CudaInvoke.CountNonZero(mask) >= 4)
+                        {
+                            int nonZeroCount = Features2DToolbox.VoteForSizeAndOrientation(
+                                modelKeyPoints,
+                                observedKeyPoints,
+                                matches,
+                                mask,
+                                1.5,
+                                20);
+                            if (nonZeroCount >= 4)
+                                homography = Features2DToolbox.GetHomographyMatrixFromMatchedFeatures(
+                                    modelKeyPoints,
+                                    observedKeyPoints,
+                                    matches,
+                                    mask,
+                                    2);
+                        }
+
+                        watch.Stop();
+                    }
+
+                    for (int i = 0; i < matches.Size; i++) score++;
+                }
+            }
+
+            //else
+            //{
+            //    SURF surfCPU = new SURF(500, 4, 2, false);
+            //    //extract features from the object image
+            //    modelKeyPoints = new VectorOfKeyPoint();
+            //    Matrix<float> modelDescriptors = surfCPU.DetectAndCompute(modelImage, null, modelKeyPoints);
+
+            //    watch = Stopwatch.StartNew();
+
+            //    // extract features from the observed image
+            //    observedKeyPoints = new VectorOfKeyPoint();
+            //    Matrix<float> observedDescriptors = surfCPU.DetectAndCompute(observedImage, null, observedKeyPoints);
+            //    BFMatcher matcher = new BFMatcher<float>(DistanceType.L2);
+            //    matcher.Add(modelDescriptors);
+
+            //    indices = new Matrix<int>(observedDescriptors.Rows, k);
+            //    using (Matrix<float> dist = new Matrix<float>(observedDescriptors.Rows, k))
+            //    {
+            //        matcher.KnnMatch(observedDescriptors, indices, dist, k, null);
+            //        mask = new Matrix<byte>(dist.Rows, 1);
+            //        mask.SetValue(255);
+            //        Features2DToolbox.VoteForUniqueness(dist, uniquenessThreshold, mask);
+            //    }
+
+            //    int nonZeroCount = CvInvoke.cvCountNonZero(mask);
+            //    if (nonZeroCount >= 4)
+            //    {
+            //        nonZeroCount = Features2DToolbox.VoteForSizeAndOrientation(modelKeyPoints, observedKeyPoints, indices, mask, 1.5, 20);
+            //        if (nonZeroCount >= 4)
+            //            homography = Features2DToolbox.GetHomographyMatrixFromMatchedFeatures(modelKeyPoints, observedKeyPoints, indices, mask, 2);
+            //    }
+
+            //    watch.Stop();
+            //}
+            matchTime = 0;
+        }
+
+        /// <summary>
+        /// The get encoder info.
+        /// </summary>
+        /// <param name="mimeType">
+        /// The mime type.
+        /// </param>
+        /// <returns>
+        /// The <see cref="ImageCodecInfo"/>.
+        /// </returns>
+        private ImageCodecInfo GetEncoderInfo(string mimeType)
         {
             // Get image codecs for all image formats
             ImageCodecInfo[] codecs = ImageCodecInfo.GetImageEncoders();
@@ -118,176 +376,18 @@ namespace FacialTest
             return null;
         }
 
-        public static void FindMatch(Mat modelImage, Mat observedImage, out long matchTime, out VectorOfKeyPoint modelKeyPoints, out VectorOfKeyPoint observedKeyPoints, VectorOfVectorOfDMatch matches, out Mat mask, out Mat homography, out long score)
+        private int CountMatches(Mat inputMat)
         {
-            int k = 2;
-            double uniquenessThreshold = 5;
+            Matrix<byte> xx = new Matrix<byte>(inputMat.Rows, inputMat.Cols);
+            inputMat.CopyTo(xx);
 
-            Stopwatch watch;
-            homography = null;
-            mask = null;
-            score = 0;
-            bool mozan = true;
-            modelKeyPoints = new VectorOfKeyPoint();
-            observedKeyPoints = new VectorOfKeyPoint();
-            if (mozan == true)
-            {
-                CudaSURF surfGPU = new CudaSURF(500,4,2,false);
-                using (CudaImage<Gray, Byte> gpuModelImage = new CudaImage<Gray, byte>(modelImage))
-                //extract features from the object image
-                using (GpuMat gpuModelKeyPoints = surfGPU.DetectKeyPointsRaw(gpuModelImage, null))
-                using (GpuMat gpuModelDescriptors = surfGPU.ComputeDescriptorsRaw(gpuModelImage, null, gpuModelKeyPoints))
-                using (CudaBFMatcher matcher = new CudaBFMatcher(DistanceType.L2))
-                {
-                    
-                    surfGPU.DownloadKeypoints(gpuModelKeyPoints, modelKeyPoints);
-                    watch = Stopwatch.StartNew();
+            var matched = xx.ManagedArray;
+            var list = matched.OfType<byte>().ToList();
+            var count = list.Count(a => a.Equals(1));
 
-                    // extract features from the observed image
-                    using (CudaImage<Gray, Byte> gpuObservedImage = new CudaImage<Gray, byte>(observedImage))
-                    using (GpuMat gpuObservedKeyPoints = surfGPU.DetectKeyPointsRaw(gpuObservedImage, null))
-                    using (GpuMat gpuObservedDescriptors = surfGPU.ComputeDescriptorsRaw(gpuObservedImage, null, gpuObservedKeyPoints))
-                    using (GpuMat<int> gpuMatchIndices = new GpuMat<int>(gpuObservedDescriptors.Size.Height, k, 1, true))
-                    using (GpuMat<float> gpuMatchDist = new GpuMat<float>(gpuObservedDescriptors.Size.Height, k, 1, true))
-                    using (GpuMat<Byte> gpuMask = new GpuMat<byte>(gpuMatchIndices.Size.Height, 1, 1))
-                    using (Emgu.CV.Cuda.Stream stream = new Emgu.CV.Cuda.Stream())
-                    {
-                        matcher.KnnMatch(gpuObservedDescriptors, gpuModelDescriptors, matches, k, null);
-                        //indices = new Matrix<int>(gpuMatchIndices.Size);
-                        //mask = new Matrix<byte>(gpuMask.Size);
-                        
+            Debug.WriteLine(count);
 
-                        Features2DToolbox.VoteForUniqueness(matches, uniquenessThreshold,gpuMask.ToMat());
-                        /*//gpu implementation of voteForUniquess
-                        using (GpuMat col0 = gpuMatchDist.Col(0))
-                        using (GpuMat col1 = gpuMatchDist.Col(1))
-                        {
-                            CudaInvoke.Multiply(col1, new GpuMat(), col1, 1, DepthType.Default, stream);
-                            CudaInvoke.Compare(col0, col1, gpuMask, CmpType.LessEqual, stream);
-                        }*/
-
-                        
-                        surfGPU.DownloadKeypoints(gpuObservedKeyPoints, observedKeyPoints);
-
-                        //wait for the stream to complete its tasks
-                        //We can perform some other CPU intesive stuffs here while we are waiting for the stream to complete.
-                        stream.WaitForCompletion();
-
-                        gpuMask.Download(mask);
-                        //gpuMatchIndices.Download(indices);
-
-                        if (CudaInvoke.CountNonZero(gpuMask) >= 4)
-                        {
-                            int nonZeroCount = Features2DToolbox.VoteForSizeAndOrientation(modelKeyPoints, observedKeyPoints, matches, mask, 1.5, 20);
-                            if (nonZeroCount >= 4)
-                                homography = Features2DToolbox.GetHomographyMatrixFromMatchedFeatures(modelKeyPoints, observedKeyPoints, matches, mask, 2);
-                        }
-
-                        watch.Stop();
-                    }
-
-                    for (int i = 0; i < matches.Size; i++)
-                    {
-                        score++;
-                    }
-                }
-            }
-            /*else
-            {
-                SURF surfCPU = new SURF(500, 4, 2, false);
-                //extract features from the object image
-                modelKeyPoints = new VectorOfKeyPoint();
-                Matrix<float> modelDescriptors = surfCPU.DetectAndCompute(modelImage, null, modelKeyPoints);
-
-                watch = Stopwatch.StartNew();
-
-                // extract features from the observed image
-                observedKeyPoints = new VectorOfKeyPoint();
-                Matrix<float> observedDescriptors = surfCPU.DetectAndCompute(observedImage, null, observedKeyPoints);
-                BruteForceMatcher<float> matcher = new BruteForceMatcher<float>(DistanceType.L2);
-                matcher.Add(modelDescriptors);
-
-                indices = new Matrix<int>(observedDescriptors.Rows, k);
-                using (Matrix<float> dist = new Matrix<float>(observedDescriptors.Rows, k))
-                {
-                    matcher.KnnMatch(observedDescriptors, indices, dist, k, null);
-                    mask = new Matrix<byte>(dist.Rows, 1);
-                    mask.SetValue(255);
-                    Features2DToolbox.VoteForUniqueness(dist, uniquenessThreshold, mask);
-                }
-
-                int nonZeroCount = CvInvoke.cvCountNonZero(mask);
-                if (nonZeroCount >= 4)
-                {
-                    nonZeroCount = Features2DToolbox.VoteForSizeAndOrientation(modelKeyPoints, observedKeyPoints, indices, mask, 1.5, 20);
-                    if (nonZeroCount >= 4)
-                        homography = Features2DToolbox.GetHomographyMatrixFromMatchedFeatures(modelKeyPoints, observedKeyPoints, indices, mask, 2);
-                }
-
-                watch.Stop();
-            }*/
-            matchTime = 0;
-        }
-
-        /// <summary>
-        /// Draw the model image and observed image, the matched features and homography projection.
-        /// </summary>
-        /// <param name="modelImage">The model image</param>
-        /// <param name="observedImage">The observed image</param>
-        /// <returns>The model image and observed image, the matched features and homography projection.</returns>
-        public static Mat Draw(Mat modelImage, Mat observedImage, out long score)
-        {
-            Mat homography;
-            VectorOfKeyPoint modelKeyPoints;
-            VectorOfKeyPoint observedKeyPoints;
-            score = 0;
-            using (VectorOfVectorOfDMatch matches = new VectorOfVectorOfDMatch())
-            {
-                Mat mask;
-                FindMatch(modelImage, observedImage, out long matchTime, out modelKeyPoints, out observedKeyPoints, matches,
-                   out mask, out homography, out score);
-
-                //Draw the matched keypoints
-                Mat result = new Mat();
-                
-                Features2DToolbox.DrawMatches(modelImage, modelKeyPoints, observedImage, observedKeyPoints,
-                   matches, result, new MCvScalar(255, 255, 255), new MCvScalar(255, 255, 255), mask);
-                #region draw the projected region on the image
-
-                if (homography != null)
-                {
-                    //draw a rectangle along the projected model
-                    Rectangle rect = new Rectangle(Point.Empty, modelImage.Size);
-                    PointF[] pts = new PointF[]
-                    {
-                  new PointF(rect.Left, rect.Bottom),
-                  new PointF(rect.Right, rect.Bottom),
-                  new PointF(rect.Right, rect.Top),
-                  new PointF(rect.Left, rect.Top)
-                    };
-                    pts = CvInvoke.PerspectiveTransform(pts, homography);
-
-                    Point[] points = Array.ConvertAll<PointF, Point>(pts, Point.Round);
-                    using (VectorOfPoint vp = new VectorOfPoint(points))
-                    {
-                        CvInvoke.Polylines(result, vp, true, new MCvScalar(255, 0, 0, 255), 5);
-                    }
-                    //pointsCount = points.Length;
-                }
-
-                #endregion
-
-                return result;
-
-            }
-
-            return null;
-        }
-
-        public void NormaliseImage(Image<Gray,byte> image1, Image<Gray, byte> image2, out Image<Gray, byte> image1out, out Image<Gray, byte> image2out)
-        {
-            image2out = image2.Resize(500, 500, Inter.Cubic);
-            image1out = image1.Resize(500, 500, Inter.Cubic);
+            return count;
         }
     }
 }
