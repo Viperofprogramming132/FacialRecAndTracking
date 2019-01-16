@@ -3,6 +3,9 @@
 // Created; 01/09/2018
 // Edited: 04/09/2018
 
+using System.Diagnostics;
+using System.Linq;
+
 namespace FacialTest
 {
 
@@ -31,13 +34,11 @@ namespace FacialTest
     {
         private Controller Control;
 
-        private Mat image = new Mat();
-
-        private ImageMan imageMan = ImageMan.Instance;
-
         private MCvPoint3D32f m_cameraLocation = new MCvPoint3D32f(0.0f, 0.0f, 0.0f);
 
         private int m_FrameNum;
+
+        private int m_FramesDisplayed = 0;
 
         private Camera m_PartnerCam;
 
@@ -49,6 +50,12 @@ namespace FacialTest
 
         private VectorOfRect VectorOfRect = new VectorOfRect();
 
+        private List<Mat> readFrames = new List<Mat>();
+
+        private List<Task<Mat>> taskList = new List<Task<Mat>>();
+
+        private readonly string CamName;
+
         /// <summary>
         /// Takes IP or Filename to run camera
         /// </summary>
@@ -56,6 +63,7 @@ namespace FacialTest
         public Camera(string address)
         {
             this.v = new VideoCapture(address);
+            this.CamName = address;
         }
 
         /// <summary>
@@ -65,6 +73,7 @@ namespace FacialTest
         public Camera(int inputIndex)
         {
             this.v = new VideoCapture(inputIndex);
+            this.CamName = inputIndex.ToString();
         }
 
         public MCvPoint3D32f CameraLocation
@@ -105,38 +114,117 @@ namespace FacialTest
             set => this.m_partnerCameraLocation = value;
         }
 
-        public async Task GetFrame()
+        public int FramesDisplayed
         {
-            ++this.m_FrameNum;
-            this.v.SetCaptureProperty(CapProp.PosFrames, this.m_FrameNum);
-            this.v.Read(this.image);
-
-            //await this.FindAllFacesAsync().ConfigureAwait(false);
-
-            Rectangle[] output = DetectPerson.FindPerson(this.image, out long time);
-
-            foreach (Face f in this.Control.Faces)
+            get
             {
-                Rectangle r = f.ROI;
-                if (f.Tracker.Update(this.image, out r))
+                return this.m_FramesDisplayed;
+            }
+            set => this.m_FramesDisplayed = value;
+        }
+
+        public List<Task<Mat>> TaskList
+        {
+            get
+            {
+                return this.taskList;
+            }
+        }
+
+        public void GetFrame()
+        {
+            Task.Run(() => this.Control.DisplayFrame(this));
+            while (true)
+            {
+                if (this.readFrames.Count <= 10)
                 {
-                    CvInvoke.Circle(
-                        this.image,
-                        new Point(r.X + (r.Width / 2), r.Y + (r.Height / 2)),
-                        20,
-                        new MCvScalar(0, 255, 0),
-                        2);
-                    f.ROI = r;
+                    Task.WaitAll(Task.Run(this.GetFramesAsync));
                 }
-                else
+
+                if (this.readFrames.Count > 0)
                 {
-                    f.Tracker = new TrackerBoosting();
+                    this.TaskList.Add(Task.Run(this.ProcessFramesAsync));
+                }
+
+                if (this.TaskList.Count > 0)
+                {
+                    for (int index = 0; index < this.TaskList.Count; index++)
+                    {
+                        Task<Mat> task = this.TaskList[index];
+
+                        if (task.IsFaulted)
+                        {
+                            this.TaskList.Remove(task);
+                            index--;
+                        }
+                    }
+                }
+
+                GC.Collect();
+            }
+        }
+
+        private async Task GetFramesAsync()
+        {
+            Mat image = new Mat();
+
+            try
+            {
+                ++this.m_FrameNum;
+                this.v.SetCaptureProperty(CapProp.PosFrames, this.m_FrameNum);
+                this.v.Read(image);
+
+                this.readFrames.Add(image);
+            }
+            catch
+            {
+                Debug.WriteLine("Trying to access open file");
+            }
+        }
+
+        private async Task<Mat> ProcessFramesAsync()
+        {
+            Mat frame = readFrames[0];
+            readFrames.RemoveAt(0);
+            List<Rectangle> output = DetectPerson.FindPerson(frame, out long time).ToList();
+            List<Rectangle> peopleRectangles = new List<Rectangle>();
+
+            foreach (Rectangle person in output)
+            {
+                if (person.Height > 250 && person.Width > 150)
+                {
+                    peopleRectangles.Add(person);
                 }
             }
 
-            CvInvoke.Imshow("Finish", this.image);
+            //this.FindAllFacesAsync(peopleRectangles,frame);
 
-            this.Control.FPS++;
+
+            foreach (Rectangle person in peopleRectangles)
+            {
+                CvInvoke.Rectangle(frame, person, new MCvScalar(255, 0, 0));
+            }
+
+            //foreach (Face f in this.Control.Faces)
+            //{
+            //    Rectangle r = f.ROI;
+            //    if (f.Tracker.Update(frame, out r))
+            //    {
+            //        CvInvoke.Circle(
+            //            frame,
+            //            new Point(r.X + (r.Width / 2), r.Y + (r.Height / 2)),
+            //            20,
+            //            new MCvScalar(0, 255, 0),
+            //            2);
+            //        f.ROI = r;
+            //    }
+            //    else
+            //    {
+            //        f.Tracker = new TrackerBoosting();
+            //    }
+            //}
+
+            return frame;
         }
 
         public void InitializeCamera()
@@ -147,99 +235,70 @@ namespace FacialTest
 
         public override string ToString()
         {
-            return this.v.CaptureSource.ToString();
+            return this.CamName;
         }
 
-        public void Tracking(Face f, Rectangle ROI)
-        {
-            this.Control.Trackers.Add(new TrackerBoosting());
-            this.Control.Trackers[this.Control.Trackers.Count - 1].Init(this.image, ROI);
-            f.Tracker = this.Control.Trackers[this.Control.Trackers.Count - 1];
-            f.FlipTracker();
-        }
-
-        private async Task FindAllFacesAsync()
+        private async Task FindAllFacesAsync(List<Rectangle> peopleRectangles,Mat image)
         {
             List<Rectangle> faces = new List<Rectangle>();
-            List<Rectangle> eyes = new List<Rectangle>();
-            List<Task<string>> tasks = new List<Task<string>>();
-            List<int> indexList = new List<int>();
+            List<Rectangle> peopleFaces = new List<Rectangle>();
             string DT = DateTime.Now.ToString("yyyy-MM-dd HH.mm.ss");
             this.ROIs.Clear();
 
-            DetectPerson.Detect(
-                this.image,
-                "haarcascade_frontalface_default.xml",
-                "haarcascade_eye.xml",
-                faces,
-                eyes,
-                out long detectionTime);
+            foreach (Rectangle person in peopleRectangles)
+            {
+                using (Image<Bgr, byte> personImage = image.ToImage<Bgr, byte>().GetSubRect(person))
+                { 
+                    DetectPerson.Detect(
+                        personImage,
+                        "haarcascade_frontalface_default.xml",
+                        peopleFaces,
+                        out long detectionTime);
+                }
+
+                for (int index = 0; index < peopleFaces.Count; index++)
+                {
+                    Rectangle face = peopleFaces[index];
+                    face.Y += person.Y;
+                    face.X += person.X;
+
+                    faces.Add(face);
+                }
+            }
+            
 
             foreach (Rectangle face in faces)
             {
-                CvInvoke.Rectangle(this.image, face, new Bgr(Color.Red).MCvScalar, 2);
+                CvInvoke.Rectangle(image, face, new Bgr(Color.Red).MCvScalar, 2);
                 this.ROIs.Add(face);
             }
 
-            List<Mat> Images = ImageMan.Instance.CropImage(this.image, this.ROIs);
+            List<Mat> Images = ImageMan.Instance.CropImage(image, this.ROIs);
 
-            for (int index = 0; index < Images.Count; index++)
+            for (int index = 0; index < faces.Count; index++)
             {
-                Mat i = Images[index];
-
-                Task<string> task = this.imageMan.CompareImagesAsync(i);
-
-                tasks.Add(task);
-                indexList.Add(index);
-            }
-
-            
-
-            Task.WaitAll(tasks.ToArray(), 1000);
-
-            for (int index = 0; index < tasks.Count; index++)
-            {
-                //this.imageMan.SavePng(DT, Images[index].Bitmap);
-                Task<string> task = tasks[index];
-                if (task.Result == "Failed")
-                {
-                    this.Control.Faces.Add(
-                        new Face(
-                            Images[indexList[index]],
-                            DT,
-                            this.ROIs,
-                            Images.FindIndex(a => a == Images[indexList[index]]),
-                            this));
-                    this.imageMan.SavePng(DT,Images[indexList[index]]);
-                }
-
-                if (task.Result != "Failed" && task.Result != "Unusable")
-                {
-                    bool exists = false;
-                    foreach (Face f in this.Control.Faces)
-                        if (f.FileName == task.Result)
-                            exists = true;
-
-                    if (!exists)
-                        this.Control.Faces.Add(
-                            new Face(
-                                Images[indexList[index]],
-                                task.Result,
-                                this.ROIs,
-                                Images.FindIndex(a => a == Images[indexList[index]]),
-                                this));
-                }
+                this.Control.Faces.Add(
+                    new Face(
+                        Images[index],
+                        DT,
+                        this.ROIs,
+                        Images.FindIndex(a => a == Images[index]),
+                        this,
+                        image));
             }
 
             this.VectorOfRect.Clear();
             this.VectorOfRect.Push(this.ROIs.ToArray());
-
-            foreach (Rectangle eye in eyes) CvInvoke.Rectangle(this.image, eye, new Bgr(Color.Blue).MCvScalar, 2);
         }
 
-        private void FindFocalLength()
+        public void partnerCamera(Camera c)
         {
-            
+            this.m_PartnerCam = c;
+
+            if (this.m_PartnerCam.PartnerCam == null)
+            {
+                this.m_PartnerCam.partnerCamera(this);
+            }
         }
     }
 }

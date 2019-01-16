@@ -3,6 +3,13 @@
 // Created; 14/08/2018
 // Edited: 04/09/2018
 
+using System.Drawing;
+using System.Linq;
+using System.Threading;
+using System.Windows.Forms;
+
+using Emgu.CV.UI;
+
 namespace FacialTest
 {
     using System;
@@ -20,8 +27,6 @@ namespace FacialTest
 
         private const bool TIMERS = false;
 
-        private const bool CONSOLE = true;
-
         private static Controller instance;
 
         private List<Camera> m_Cameras = new List<Camera>();
@@ -35,6 +40,8 @@ namespace FacialTest
         private Stopwatch Stopwatch;
 
         private readonly bool cuda = true;
+
+        List<ImageViewer> imageViewers = new List<ImageViewer>();
         
 
         private Controller()
@@ -72,64 +79,73 @@ namespace FacialTest
 
         public bool Cuda
         {
-            get
-            {
-                return this.cuda;
-            }
-        }
-
-        public bool Console
-        {
-            get
-            {
-                return CONSOLE;
-            }
+            get => this.cuda;
         }
 
         public List<Face> Faces
         {
-            get
-            {
-                return this.m_Faces;
-            }
-            set
-            {
-                this.m_Faces = value;
-            }
+            get => this.m_Faces;
+            set => this.m_Faces = value;
+        }
+
+        public bool DebugTools
+        {
+            get => DEBUG;
         }
 
         public void InitializeControl()
         {
-            if (TIMERS) this.Stopwatch = new Stopwatch();
+            this.Stopwatch = new Stopwatch();
 
-            //this.Cameras.Add(new Camera(0));
+            this.Cameras.Add(new Camera("Above Curtain.mp4"));
+            this.Cameras.Add(new Camera("Above Stage.mp4"));
 
-            this.Cameras.Add(new Camera("http://192.168.1.191:8081"));
+            foreach (Camera c in this.Cameras)
+            {
+                c.InitializeCamera();
 
-            //this.Cameras.Add(new Camera("http://192.168.1.192:8081"));
+                this.imageViewers.Add(new ImageViewer(null, c.ToString()));
+                this.imageViewers.Last().Name = c.ToString();
+                this.imageViewers.Last().Show();
+                this.imageViewers.Last().Size = new Size(1280, 960);
+            }
 
-            foreach (Camera c in this.Cameras) c.InitializeCamera();
+            for (int index = 1; index <= this.Cameras.Count; ++index)
+            {
+                if (index % 2 == 0)
+                {
+                    this.Cameras[index-1].partnerCamera(this.Cameras[index - 2]);
+                }
+            }
         }
 
-        public async void ReadAllFrames()
+        public void ReadAllFrames(Camera c)
         {
-            // List<Task> cameraTaskList = new List<Task>();
+            c.GetFrame();
+        }
+
+        public async Task DisplayFrame(Camera c)
+        {
             while (true)
             {
-                foreach (Camera c in this.Cameras)
+                if (c.TaskList.Count > 1)
                 {
-                    try
+                    if ((c.TaskList[0].IsCompleted && !c.TaskList[0].IsFaulted) && c.PartnerCam.FramesDisplayed >= c.FramesDisplayed)
                     {
-                        await c.GetFrame().ConfigureAwait(false);
-                        
-                    }
-                    catch (Exception e)
-                    {
-                        Debug.WriteLine(e);
+                        Mat frame = c.TaskList[0].Result;
+                        c.TaskList.RemoveAt(0);
+                        c.FramesDisplayed++;
+
+                        foreach (ImageViewer imageViewer in this.imageViewers)
+                        {
+
+                            if (imageViewer.Name == c.ToString())
+                            {
+                                imageViewer.Image = frame;
+                            }
+                        }
                     }
                 }
-
-                await Task.Delay(100).ConfigureAwait(true);
             }
         }
     }

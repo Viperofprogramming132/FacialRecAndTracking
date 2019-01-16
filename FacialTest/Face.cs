@@ -3,6 +3,8 @@
 // Created; 14/08/2018
 // Edited: 04/09/2018
 
+using System.Linq;
+
 namespace FacialTest
 {
     using System.Collections.Generic;
@@ -31,13 +33,14 @@ namespace FacialTest
             string fileName,
             List<Rectangle> ROIs,
             int Index,
-            Camera captureCamera)
+            Camera captureCamera,
+            Mat image)
         {
             this.m_Face = face;
             this.m_fileName = fileName;
             this.m_captureCamera = captureCamera;
-            captureCamera.Tracking(this, ROIs[Index]);
             this.m_ROI = ROIs[Index];
+            Tracking(image);
         }
 
         public Mat FaceImage
@@ -69,6 +72,14 @@ namespace FacialTest
         public void FlipTracker()
         {
             this.m_Tracked = !this.m_Tracked;
+        }
+
+        public void Tracking(Mat image)
+        {
+            Controller.Instance.Trackers.Add(new TrackerBoosting());
+            Controller.Instance.Trackers.Last().Init(image, this.m_ROI);
+            Tracker = Controller.Instance.Trackers.Last();
+            FlipTracker();
         }
     }
 }

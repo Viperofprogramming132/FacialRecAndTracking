@@ -2,6 +2,16 @@
 // Filename; DetectFace.cs
 // Created; 10/08/2018
 // Edited: 04/09/2018
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Drawing;
+
+using Emgu.CV;
+using Emgu.CV.CvEnum;
+using Emgu.CV.Structure;
+using Emgu.CV.Util;
+
 
 #if !(__IOS__ || NETFX_CORE)
 using Emgu.CV.Cuda;
@@ -10,24 +20,14 @@ using Emgu.CV.Cuda;
 
 namespace FacialTest
 {
-    using System;
-    using System.Collections.Generic;
-    using System.Diagnostics;
-    using System.Drawing;
 
-    using Emgu.CV;
-    using Emgu.CV.CvEnum;
-    using Emgu.CV.Structure;
-    using Emgu.CV.Util;
 
     public static class DetectPerson
     {
         public static void Detect(
             IInputArray image,
             string faceFileName,
-            string eyeFileName,
             List<Rectangle> faces,
-            List<Rectangle> eyes,
             out long detectionTime)
         {
             Stopwatch watch;
@@ -37,14 +37,10 @@ namespace FacialTest
                 if (Controller.Instance.Cuda)
                 {
                 using (CudaCascadeClassifier face = new CudaCascadeClassifier(faceFileName))
-                using (CudaCascadeClassifier eye = new CudaCascadeClassifier(eyeFileName))
                 {
                     face.ScaleFactor = 1.1;
                     face.MinNeighbors = 10;
                     face.MinObjectSize = Size.Empty;
-                    eye.ScaleFactor = 1.1;
-                    eye.MinNeighbors = 10;
-                    eye.MinObjectSize = Size.Empty;
                     watch = Stopwatch.StartNew();
                     using (CudaImage<Bgr, byte> gpuImage = new CudaImage<Bgr, byte>(image))
                     using (CudaImage<Gray, byte> gpuGray = gpuImage.Convert<Gray, byte>())
@@ -53,26 +49,6 @@ namespace FacialTest
                         face.DetectMultiScale(gpuGray, region);
                         Rectangle[] faceRegion = face.Convert(region);
                         faces.AddRange(faceRegion);
-                        foreach (Rectangle f in faceRegion)
-                        {
-                            using (CudaImage<Gray, Byte> faceImg = gpuGray.GetSubRect(f))
-                            {
-                                //For some reason a clone is required.
-                                //Might be a bug of CudaCascadeClassifier in opencv
-                                using (CudaImage<Gray, byte> clone = faceImg.Clone(null))
-                                using (GpuMat eyeRegionMat = new GpuMat())
-                                {
-                                    eye.DetectMultiScale(clone, eyeRegionMat);
-                                    Rectangle[] eyeRegion = eye.Convert(eyeRegionMat);
-                                    foreach (Rectangle e in eyeRegion)
-                                    {
-                                        Rectangle eyeRect = e;
-                                        eyeRect.Offset(f.X, f.Y);
-                                        eyes.Add(eyeRect);
-                                    }
-                                }
-                            }
-                        }
                     }
                     watch.Stop();
                 }
@@ -82,7 +58,6 @@ namespace FacialTest
                 {
                     //Read the HaarCascade objects
                     using (CascadeClassifier face = new CascadeClassifier(faceFileName))
-                    using (CascadeClassifier eye = new CascadeClassifier(eyeFileName))
                     {
                         watch = Stopwatch.StartNew();
 
@@ -103,26 +78,6 @@ namespace FacialTest
                             new Size(20, 20));
 
                             faces.AddRange(facesDetected);
-
-                            foreach (Rectangle f in facesDetected)
-                            {
-                                //Get the region of interest on the faces
-                                using (UMat faceRegion = new UMat(ugray, f))
-                                {
-                                    Rectangle[] eyesDetected = eye.DetectMultiScale(
-                                    faceRegion,
-                                    1.1,
-                                    10,
-                                    new Size(20, 20));
-
-                                    foreach (Rectangle e in eyesDetected)
-                                    {
-                                        Rectangle eyeRect = e;
-                                        eyeRect.Offset(f.X, f.Y);
-                                        eyes.Add(eyeRect);
-                                    }
-                                }
-                            }
                         }
                         watch.Stop();
                     }
@@ -160,7 +115,7 @@ namespace FacialTest
                             using (GpuMat cudaBgra = new GpuMat())
                             using (VectorOfRect vr = new VectorOfRect())
                             {
-                                CudaInvoke.CvtColor(image, cudaBgra, ColorConversion.Bgr2Bgra);
+                                CudaInvoke.CvtColor(GpuImage, cudaBgra, ColorConversion.Bgr2Bgra);
                                 des.DetectMultiScale(cudaBgra, vr);
                                 regions = vr.ToArray();
                             }

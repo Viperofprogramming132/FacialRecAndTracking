@@ -43,36 +43,6 @@ namespace FacialTest
             }
         }
 
-        public async Task<string> CompareImagesAsync(Mat Image)
-        {
-            List<string> imageDirectory =
-                Directory.GetFiles(Directory.GetCurrentDirectory() + "\\photos", "*.png").ToList();
-            List<long> scores = new List<long>();
-            foreach (string s in imageDirectory)
-            {
-                Mat i = new Mat(s);
-                ////CvInvoke.Imshow("AbsDiff", i);
-                this.NormaliseImage(Image, i, out Image, out i);
-
-                await Task.Delay(1);
-
-                await this.Draw(i, Image, out long score, out Mat resultMat).ConfigureAwait(false);
-
-                CvInvoke.Imshow("AbsDiff", resultMat);
-                resultMat.Dispose();
-                Debug.WriteLine(score);
-                scores.Add(score);
-            }
-
-            for (int i = 0; i < scores.Count; ++i)
-            {
-                if (scores[i] > 7) return imageDirectory[i];
-
-                if (scores[i] < 5) return "Unusable";
-            }
-
-            return "Failed";
-        }
 
         public List<Mat> CropImage(Mat image, List<Rectangle> ROIs)
         {
@@ -82,7 +52,7 @@ namespace FacialTest
             {
                 using (Mat i = new Mat(image,roi))
                 {
-                    CvInvoke.CvtColor(i,i,ColorConversion.Bgr2Gray);
+                    CvInvoke.CvtColor(i, i, ColorConversion.Bgr2Gray);
                     returnImage.Add(i);
                 }
             }
@@ -90,19 +60,6 @@ namespace FacialTest
             return returnImage;
         }
 
-        public void NormaliseImage(
-            Mat image1,
-            Mat image2,
-            out Mat image1out,
-            out Mat image2out)
-        {
-            image1out = new Mat();
-            image2out = new Mat();
-
-
-            CvInvoke.Resize(image1, image1out, new Size(250, 250));
-            CvInvoke.Resize(image2, image2out, new Size(250, 250));
-        }
 
         /// <summary>
         /// Save image as png
