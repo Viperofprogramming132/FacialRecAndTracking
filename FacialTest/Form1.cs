@@ -7,6 +7,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 
+using Emgu.CV;
+
 namespace FacialTest
 {
     using System;
@@ -23,6 +25,14 @@ namespace FacialTest
         private bool running = false;
 
         List<Thread> cameraThreads = new List<Thread>();
+
+        private int framesDisplayed;
+
+        private int previousFramesDisplayed;
+
+        Thread frameReader = new Thread(ReadFrames);
+
+        Thread cudaThread = new Thread(CudaTimer);
 
         public Form1()
         {
@@ -41,25 +51,34 @@ namespace FacialTest
                 }
 
                 this.FPSTimer.Start();
+                this.UpdateImageViewers.Start();
+                this.cudaThread.Start();
+                this.frameReader.Start();
                 this.running = !this.running;
             }
             else
             {
                 this.StopDisplay();
-                GC.Collect();
+                //GC.Collect();
             }
         }
 
         private void FPSTimer_Tick(object sender, EventArgs e)
         {
-            this.lbl_FPSNum.Text = this.trackingController.FPS.ToString();
-
             if (this.trackingController.DebugTools)
             {
                 Debug.WriteLine("Cameras: " + this.trackingController.Cameras.Count);
                 Debug.WriteLine("Trackers: " + this.trackingController.Trackers.Count);
                 Debug.WriteLine("Faces: " + this.trackingController.Faces.Count);
             }
+
+            //GC.Collect();
+
+            int frames = this.framesDisplayed - this.previousFramesDisplayed;
+
+            this.previousFramesDisplayed = this.framesDisplayed;
+
+            this.lbl_FrameTimeNum.Text = frames + " fps";
         }
 
         private void StopDisplay()
@@ -69,12 +88,54 @@ namespace FacialTest
                 thread.Abort();
             }
             this.FPSTimer.Stop();
+            this.UpdateImageViewers.Stop();
             this.running = !this.running;
+            this.cudaThread.Abort();
+            this.frameReader.Abort();
         }
 
         private void Form1_FormClosing(object sender, FormClosingEventArgs e)
         {
             this.StopDisplay();
+        }
+
+        private void UpdateImageViewers_Tick(object sender, EventArgs e)
+        {
+            int tempFramesDisplayed = 0;
+            foreach (Camera c in this.trackingController.Cameras)
+            {
+                tempFramesDisplayed = this.trackingController.DisplayFrame(c);
+            }
+
+            this.framesDisplayed += tempFramesDisplayed;
+        }
+
+        private static void CudaTimer()
+        {
+            while (true)
+            {
+                foreach (Camera c in Controller.Instance.Cameras)
+                {
+                    c.CudaFindPeople();
+                    c.FindAllFacesAsync();
+                }
+            }
+        }
+
+        private static void ReadFrames()
+        {
+            while (true)
+            {
+                foreach (Camera c in Controller.Instance.Cameras)
+                {
+                    c.ReadFrame();
+                }
+
+                foreach (Face f in Controller.Instance.Faces.ToArray())
+                {
+                    f.CheckForCollition();
+                }
+            }
         }
     }
     

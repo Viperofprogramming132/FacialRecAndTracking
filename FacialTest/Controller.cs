@@ -1,7 +1,7 @@
-﻿// Project: FacialTest
-// Filename; Controller.cs
-// Created; 14/08/2018
-// Edited: 04/09/2018
+﻿// Project:     FacialTest
+// Filename;    Controller.cs
+// Created;     14/08/2018
+// Edited:      04/09/2018
 
 using System.Drawing;
 using System.Linq;
@@ -42,6 +42,8 @@ namespace FacialTest
         private readonly bool cuda = true;
 
         List<ImageViewer> imageViewers = new List<ImageViewer>();
+
+        ReaderWriterLockSlim m_FaceLock = new ReaderWriterLockSlim();
         
 
         private Controller()
@@ -84,8 +86,31 @@ namespace FacialTest
 
         public List<Face> Faces
         {
-            get => this.m_Faces;
-            set => this.m_Faces = value;
+            get
+            {
+                try
+                {
+                    this.m_FaceLock.EnterReadLock();
+                    return this.m_Faces;
+                }
+                finally
+                {
+                    this.m_FaceLock.ExitReadLock();
+                }
+            }
+            set
+            {
+                try
+                {
+                    this.m_FaceLock.EnterWriteLock();
+                    this.m_Faces = value;
+                }
+                finally
+                {
+                    this.m_FaceLock.ExitWriteLock();
+                }
+                
+            }
         }
 
         public bool DebugTools
@@ -102,9 +127,9 @@ namespace FacialTest
 
             foreach (Camera c in this.Cameras)
             {
-                c.InitializeCamera();
-
                 this.imageViewers.Add(new ImageViewer(null, c.ToString()));
+                c.InitializeCamera(this.imageViewers.Last());
+
                 this.imageViewers.Last().Name = c.ToString();
                 this.imageViewers.Last().Show();
                 this.imageViewers.Last().Size = new Size(1280, 960);
@@ -114,7 +139,7 @@ namespace FacialTest
             {
                 if (index % 2 == 0)
                 {
-                    this.Cameras[index-1].partnerCamera(this.Cameras[index - 2]);
+                    this.Cameras[index-1].PartnerCamera(this.Cameras[index - 2]);
                 }
             }
         }
@@ -124,29 +149,23 @@ namespace FacialTest
             c.GetFrame();
         }
 
-        public async Task DisplayFrame(Camera c)
+        public int DisplayFrame(Camera c)
         {
-            while (true)
+
+            if (c.CompletedFrames.Count > 0)
             {
-                if (c.TaskList.Count > 1)
-                {
-                    if ((c.TaskList[0].IsCompleted && !c.TaskList[0].IsFaulted) && c.PartnerCam.FramesDisplayed >= c.FramesDisplayed)
-                    {
-                        Mat frame = c.TaskList[0].Result;
-                        c.TaskList.RemoveAt(0);
-                        c.FramesDisplayed++;
+                Mat frame = c.CompletedFrames.First().Value;
 
-                        foreach (ImageViewer imageViewer in this.imageViewers)
-                        {
+                c.CompletedFrames.Remove(c.CompletedFrames.First().Key);
+                c.FramesDisplayed++;
 
-                            if (imageViewer.Name == c.ToString())
-                            {
-                                imageViewer.Image = frame;
-                            }
-                        }
-                    }
-                }
+                c.CamImageViewer.Image = frame;
+
+
+                return 1;
             }
+
+            return 0;
         }
     }
 }

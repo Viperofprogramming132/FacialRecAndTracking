@@ -3,7 +3,9 @@
 // Created; 14/08/2018
 // Edited: 04/09/2018
 
+using System;
 using System.Linq;
+using System.Threading;
 
 namespace FacialTest
 {
@@ -28,6 +30,8 @@ namespace FacialTest
 
         private Tracker m_Tracker;
 
+        private ReaderWriterLockSlim m_ROILock = new ReaderWriterLockSlim();
+
         public Face(
             Mat face,
             string fileName,
@@ -38,7 +42,7 @@ namespace FacialTest
         {
             this.m_Face = face;
             this.m_fileName = fileName;
-            this.m_captureCamera = captureCamera;
+            this.MCaptureCamera = captureCamera;
             this.m_ROI = ROIs[Index];
             Tracking(image);
         }
@@ -57,8 +61,30 @@ namespace FacialTest
 
         public Rectangle ROI
         {
-            get => this.m_ROI;
-            set => this.m_ROI = value;
+            get
+            {
+                try
+                {
+                    this.m_ROILock.EnterReadLock();
+                    return this.m_ROI;
+                }
+                finally
+                {
+                    this.m_ROILock.ExitReadLock();
+                }
+            }
+            set
+            {
+                try
+                {
+                    this.m_ROILock.EnterWriteLock();
+                    this.m_ROI = value;
+                }
+                finally
+                {
+                    this.m_ROILock.ExitWriteLock();
+                }
+            } 
         }
 
         public bool Tracked => this.m_Tracked;
@@ -67,6 +93,18 @@ namespace FacialTest
         {
             get => this.m_Tracker;
             set => this.m_Tracker = value;
+        }
+
+        public Camera MCaptureCamera
+        {
+            get
+            {
+                return this.m_captureCamera;
+            }
+            set
+            {
+                this.m_captureCamera = value;
+            }
         }
 
         public void FlipTracker()
@@ -80,6 +118,43 @@ namespace FacialTest
             Controller.Instance.Trackers.Last().Init(image, this.m_ROI);
             Tracker = Controller.Instance.Trackers.Last();
             FlipTracker();
+        }
+
+        public bool UpdateTracker(Mat frame)
+        {
+            Rectangle r = new Rectangle();
+            bool success = false;
+            try
+            {
+                success = this.m_Tracker.Update(frame, out r);
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(e);
+                throw;
+            }
+            
+
+            ROI = r;
+
+            return success;
+        }
+
+        public void CheckForCollition()
+        {
+            Face[] faces = Controller.Instance.Faces.ToArray();
+
+            List<Face> facesList = faces.ToList();
+
+            facesList.Remove(this);
+
+            foreach (Face f in facesList)
+            {
+                if (this.m_ROI.IntersectsWith(f.ROI))
+                {
+                    Controller.Instance.Faces.Remove(f);
+                }
+            }
         }
     }
 }

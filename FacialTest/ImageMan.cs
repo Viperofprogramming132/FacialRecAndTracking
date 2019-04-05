@@ -44,18 +44,38 @@ namespace FacialTest
         }
 
 
-        public List<Mat> CropImage(Mat image, List<Rectangle> ROIs)
+        public List<Mat> CropImage(IInputArray image, List<Rectangle> ROIs)
         {
             List<Mat> returnImage = new List<Mat>();
-            
-            foreach (Rectangle roi in ROIs)
+            if (Controller.Instance.Cuda)
             {
-                using (Mat i = new Mat(image,roi))
+                using (GpuMat im = new GpuMat(image))
                 {
-                    CvInvoke.CvtColor(i, i, ColorConversion.Bgr2Gray);
-                    returnImage.Add(i);
+                    CudaInvoke.CvtColor(im, im, ColorConversion.Bgr2Gray);
+                    foreach (Rectangle roi in ROIs)
+                    {
+                        CudaImage<Gray, byte> i = new CudaImage<Gray, byte>();
+                        im.CopyTo(i);
+                        i.GetSubRect(roi);
+                        returnImage.Add(i.ToMat());
+                    }
                 }
             }
+            else
+            {
+                using (Mat im = new Mat())
+                {
+                    CvInvoke.CvtColor(image, im, ColorConversion.Bgr2Gray);
+                    foreach (Rectangle roi in ROIs)
+                    {
+                        using (Mat i = new Mat(im, roi))
+                        {
+                            returnImage.Add(i);
+                        }
+                    }
+                }
+            }
+
 
             return returnImage;
         }
@@ -135,8 +155,6 @@ namespace FacialTest
 
                 return Task.FromResult<Mat>(result);
             }
-
-            return null;
         }
 
         /// <summary>
